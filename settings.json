@@ -1,8 +1,19 @@
 {
-    "min_flag_area_ratio": 0.001,
+    "min_flag_area_ratio": 0.003,
     "aspect_ratio_range": [0.5, 2.0],
     "kernel_size": 3,
     "blur_kernel_size": 3,
+    "lighting_compensation": {
+        "enabled": true,
+        "clip_limit": 2.0,
+        "tile_grid_size": 8
+    },
+    "white_sheet": {
+        "enabled": true,
+        "max_saturation": 40,
+        "min_brightness": 60,
+        "min_area_ratio": 0.02
+    },
     "colors": {
        "red": {
     "lower1": [0, 45, 40],
@@ -12,15 +23,15 @@
              
         },
         "blue": {
-            "lower1": [100, 150, 50],
-            "upper1": [140, 255, 255]
+            "lower1": [100, 70, 35],
+            "upper1": [129, 255, 255]
         },
         "green": {
-            "lower1": [35, 100, 50],
-            "upper1": [85, 255, 255]
+            "lower1": [40, 50, 35],
+            "upper1": [75, 255, 255]
         },
         "yellow": {
-            "lower1": [20, 100, 100],
+            "lower1": [20, 100, 50],
             "upper1": [35, 255, 255]
         },
         "orange": {
@@ -28,7 +39,7 @@
             "upper1": [20, 255, 255]
         },
         "purple": {
-            "lower1": [130, 50, 50],
+            "lower1": [130, 50, 35],
             "upper1": [160, 255, 255]
         }
     }

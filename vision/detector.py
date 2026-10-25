@@ -3,6 +3,9 @@
 import cv2
 import numpy as np
 
+from vision.lighting import compensate_lighting
+from vision.white_sheet import find_sheet_region
+
 # Area ratios reject image noise without assuming a physical flag size.
 # Shape filtering stays optional when flag proportions are unknown.
 
@@ -30,7 +33,7 @@ def build_mask(hsv_frame, color_ranges, settings):
     return mask #mask is cleaned and sent
 
 
-def find_largest_blob(mask, settings):
+def find_largest_blob(mask, settings, sheet_region=None):
     contours, _ = cv2.findContours(
         mask,
         cv2.RETR_EXTERNAL,
@@ -62,6 +65,19 @@ def find_largest_blob(mask, settings):
             if not (min_ar <= aspect_ratio <= max_ar):
                 continue
 
+        if sheet_region is not None:
+            # Check the complete blob so clipping an outside object cannot
+            # produce a small false flag or move its reported center.
+            blob_mask = np.zeros((h, w), dtype=np.uint8)
+            cv2.drawContours(
+                blob_mask, [contour], -1, 255, cv2.FILLED, offset=(-x, -y)
+            )
+            inside = cv2.bitwise_and(
+                blob_mask, sheet_region[y:y + h, x:x + w]
+            )
+            if cv2.countNonZero(inside) < 0.9 * cv2.countNonZero(blob_mask):
+                continue
+
         valid_blobs.append({
             "area": area,
             "box": (x, y, w, h)
@@ -81,13 +97,19 @@ def detect_flag(frame, settings):
 
 #convert from BGR to HSV, better for color detection
     hsv=cv2.cvtColor(blurred_frame, cv2.COLOR_BGR2HSV)
+    # Locate the sheet before brightness correction, using neutral pixels.
+    sheet_region = find_sheet_region(hsv, settings)
+    if sheet_region is not None and cv2.countNonZero(sheet_region) == 0:
+        return {"detected": False, "sheet_found": False}
+    # Optionally adjust brightness before checking the configured color ranges.
+    hsv = compensate_lighting(hsv, settings)
 #variables that will hold the winning color and its blob
     best_color=None
     best_blob=None
     # Search all configured profiles; no operator-selected color is required.
     for color_name, ranges in settings["colors"].items():
         mask = build_mask(hsv, ranges, settings)
-        blob=find_largest_blob(mask, settings)
+        blob=find_largest_blob(mask, settings, sheet_region)
 #mask is made first  to find the best flag shaped blob in that mask
 
         if blob is not None:

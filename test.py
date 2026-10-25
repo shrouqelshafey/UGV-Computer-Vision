@@ -14,6 +14,13 @@ USE_ESP32 = False
 LCD_SERIAL_PORT = "COM5"  # Use the control ESP32's actual port for USB tests.
 
 
+def restart_detection(announcer):
+    # Forget the old result and allow the same color to be announced again.
+    announcer.reset()
+    print("[INFO] Detection restarted. Waiting for four fresh matching detections.")
+    return FlagStabilizer(required_consecutive_frames=4)
+
+
 def main():
     try:
         settings = load_settings()
@@ -30,14 +37,14 @@ def main():
     cap = None
     try:
         # Update this IP if the camera reports a new address in Serial Monitor.
-        camera_url = "http://192.168.1.100:81/stream"
+        camera_url = "http://192.168.1.104:81/stream"
         cap = open_camera(camera_url)
 
         if not cap.isOpened():
             print("[ERROR] Could not open camera.")
             return
         stabilizer=FlagStabilizer(required_consecutive_frames=4) #onlu trust a detection after 4 frames in a row
-        print("[INFO] Pure Flag Vision Module Running. Press 'q' to Quit.")
+        print("[INFO] Pure Flag Vision Module Running. Press 'r' to restart detection, 'q' to quit.")
 
         max_consecutive_failures=30 # Failed-read count before exiting, not seconds.
         failure_count=0
@@ -61,8 +68,11 @@ def main():
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2
                 )
                 cv2.imshow("Flag Vision Module", offline_frame)
-                if cv2.waitKey(100) & 0xFF == ord('q'):
+                key = cv2.waitKey(100) & 0xFF
+                if key == ord('q'):
                     break
+                elif key in (ord('r'), ord('R')):
+                    stabilizer = restart_detection(announcer)
 
                 if failure_count >= max_consecutive_failures:
                     # Stop after repeated failures; restart Python to open a new stream.
@@ -106,7 +116,13 @@ def main():
                 cv2.putText(frame, f"Center: ({cx}, {cy})", (20, 75),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
             else:
-                cv2.putText(frame, "Status: Searching / Stabilizing...", (20, 40),
+                # Explain missing sheet instead of silently searching the room.
+                status_text = (
+                    "White sheet not found"
+                    if raw_detection.get("sheet_found") is False
+                    else "Status: Searching / Stabilizing..."
+                )
+                cv2.putText(frame, status_text, (20, 40),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
     #show the frame in a window
             cv2.imshow("Flag Vision Module", frame)
@@ -115,6 +131,9 @@ def main():
 
             if key == ord('q'):
                 break
+            elif key in (ord('r'), ord('R')):
+                # Reset detection only; keep camera and current settings in use.
+                stabilizer = restart_detection(announcer)
 
     finally:
         # Release the camera, optional Serial port and windows on every exit path.

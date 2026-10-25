@@ -17,7 +17,7 @@ class FlagAnnouncer:
     def __init__(self, use_esp32=False, port="COM5", lost_frame_threshold=10):
         self.esp32 = None
         self.lost_frame_threshold = lost_frame_threshold
-        # Track announcements automatically without a manual selection/reset key.
+        # Remember which color has already been announced.
         self.last_announced_color = None
         self.lost_frames = 0
         if use_esp32:
@@ -49,6 +49,11 @@ class FlagAnnouncer:
             print(f"[WARN] LCD write failed; using terminal only: {error}")
             self.close()
         self.last_announced_color = color
+
+    def reset(self):
+        """Allow a fresh announcement without closing the optional Serial port."""
+        self.last_announced_color = None
+        self.lost_frames = 0
 
     def close(self):
         if self.esp32 is not None:

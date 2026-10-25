@@ -6,7 +6,7 @@ import sys
 import unittest
 from unittest.mock import MagicMock, patch
 
-import flag_detector_color_identification as app
+import test as app
 from communication.lcd_announcer import FlagAnnouncer, announce_on_lcd
 
 
@@ -72,6 +72,43 @@ class AnnouncementTests(unittest.TestCase):
         announcer.close()
         serial_module.Serial.return_value.close.assert_called_once()
 
+    def test_reset_allows_same_color_without_closing_serial(self):
+        announcer = FlagAnnouncer()
+        port = MagicMock()
+        message = b"FLAG_DETECTED,RED\n"
+        port.write.return_value = len(message)
+        announcer.esp32 = port
+        red = {"confirmed": True, "color": "red"}
+        announcer.update(red)
+        announcer.reset()
+        announcer.update(red)
+        self.assertEqual(port.write.call_count, 2)
+        port.close.assert_not_called()
+
+    def test_r_requires_four_fresh_detections_without_reopening_camera(self):
+        for reset_key in ("r", "R"):
+            with self.subTest(reset_key=reset_key):
+                image = app.np.full((240, 320, 3), 255, dtype=app.np.uint8)
+                image[70:150, 110:210] = (0, 0, 255)
+                capture = MagicMock()
+                capture.isOpened.return_value = True
+                capture.read.side_effect = [(True, image.copy()) for _ in range(8)]
+                announced_at_frames = []
+                with patch.object(app, "open_camera", return_value=capture) as opening, patch.object(
+                    app.cv2, "waitKey",
+                    side_effect=[-1] * 3 + [ord(reset_key)] + [-1] * 3 + [ord("q")]
+                ), patch.object(app.cv2, "imshow"), patch.object(
+                    app.cv2, "destroyAllWindows"
+                ), patch(
+                    "communication.lcd_announcer.announce_on_lcd",
+                    side_effect=lambda *args: announced_at_frames.append(capture.read.call_count)
+                ):
+                    app.main()
+                # Confirm on frame 4, press reset, then confirm again on frame 8.
+                self.assertEqual(announced_at_frames, [4, 8])
+                opening.assert_called_once()
+                capture.release.assert_called_once()
+
     def test_main_counts_failed_reads_without_reopening(self):
         # A camera outage must not bring back the removed reconnection feature.
         capture = MagicMock()
@@ -90,7 +127,8 @@ class AnnouncementTests(unittest.TestCase):
 
     def test_main_announces_once_after_four_real_detections(self):
         # Exercise the real detector and stabilizer without a physical camera.
-        image = app.np.zeros((240, 320, 3), dtype=app.np.uint8)
+        # Match the competition setup: a non-white flag on a white sheet.
+        image = app.np.full((240, 320, 3), 255, dtype=app.np.uint8)
         image[40:120, 50:150] = (0, 0, 255)
         capture = MagicMock()
         capture.isOpened.return_value = True
