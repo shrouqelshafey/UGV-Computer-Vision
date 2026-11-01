@@ -43,20 +43,18 @@ flowchart TD
     C --> D["HSV: separate color, saturation and brightness"]
     D --> E["Color masks: mark matching pixels"]
     E --> F["Clean masks: remove small noise and fill gaps"]
-    F --> G["Find contours and filter by area and aspect ratio"]
+    F --> G["Filter area and shape"]
     G --> H["Choose the largest valid colored region"]
     H --> I["Calculate its bounding box and center"]
     I --> J{"Same color detected four times in a row?"}
     J -->|Yes| K["Display result and horizontal error"]
     K --> L["Announce color when a new event is allowed"]
-    J -->|No| M["Display Searching / Stabilizing"]
+    J -->|No| M["Display: Searching for flag / Confirming color"]
     L --> B
     M --> B
 ```
 
-**Example:** a red flag enters the image. The detector finds a red region, confirms it after four consecutive detections, draws a box around it, and announces `RED`.
-
-If no valid region is found, confirmation resets and the preview shows **Searching / Stabilizing**.
+**Example:** the preview shows **Searching for flag...**. A red flag in view changes the status to **Confirming red flag...**, then becomes confirmed after four consecutive detections.
 
 ### Run the application
 
@@ -64,12 +62,12 @@ From the repository directory:
 
 ```powershell
 python -m pip install -r requirements.txt
-python flag_detector_color_identification.py
+python test.py
 ```
 
-Update `camera_url` in the main file to the camera's current IP address. Close any browser camera stream before starting Python. Focus the preview window and press **`q`** to exit.
+Update `CAM_IP` in `test.py` to the camera's current IP address, without a port or URL prefix. Close other browser camera streams before starting Python. Focus the preview window and press **`q`** to exit or **`r`** to restart detection.
 
-There is no calibration or settings-reload shortcut. Restart Python after editing `settings.json`.
+There is no manual calibration or settings-reload shortcut. Restart Python after editing `settings.json`. The `r` key clears confirmation; it does not reload settings.
 
 ## 4. Color Detection Using HSV and cv2.inRange()
 
@@ -89,8 +87,8 @@ HSV helps organize the thresholds, but lighting, shadows, exposure, and white ba
 
 ```python
 # Example: mark pixels inside the configured blue HSV range.
-lower = np.array([100, 150, 50])
-upper = np.array([140, 255, 255])
+lower = np.array([100, 70, 35])
+upper = np.array([129, 255, 255])
 mask = cv2.inRange(hsv_frame, lower, upper)
 ```
 
@@ -107,7 +105,7 @@ White in a mask means "selected pixel"; it does not mean the original object is 
 
 | Setting | Current value | Purpose |
 | --- | --- | --- |
-| `min_flag_area_ratio` | `0.001` | Reject contours smaller than 0.1% of the image area. |
+| `min_flag_area_ratio` | `0.003` | Reject contours smaller than 0.3% of the image area. |
 | `aspect_ratio_range` | `[0.5, 2.0]` | Accept bounding-box width / height between 0.5 and 2.0. |
 | `kernel_size` | `3` | Use a 3 × 3 neighborhood for mask cleanup. |
 | `blur_kernel_size` | `3` | Use a 3 × 3 Gaussian blur before color filtering. |
@@ -116,7 +114,7 @@ White in a mask means "selected pixel"; it does not mean the original object is 
 For a 320 × 240 image, the minimum contour area is:
 
 ```text
-320 × 240 × 0.001 = 76.8 pixels²
+320 × 240 × 0.003 = 230.4 pixels²
 ```
 
 This threshold scales with image resolution. It does not measure physical flag size or distance.
@@ -125,7 +123,7 @@ A smaller kernel preserves more small details but may leave more noise. A larger
 
 Red uses two HSV intervals because it crosses the ends of OpenCV's standard hue scale. The masks from both intervals are combined.
 
-**White is excluded as a flag color** because the expected background is a white sheet and the flag is non-white. The program still searches the full image; automatic restriction to the sheet's boundary is not implemented.
+**White is excluded as a flag color** because the flag is placed on a white background. The detector searches the whole frame for the configured colors.
 
 ## 6. Functions and Methods Used in the Implementation
 
@@ -171,7 +169,7 @@ center_x = x + w // 2
 center_y = y + h // 2
 ```
 
-The returned dictionary contains `detected`, `color`, `area`, `box`, and `center`. If no candidate is accepted, it returns `{"detected": False}`.
+The returned dictionary contains `detected` and, when a flag is found, its color, area, box and center. Coordinates are relative to the full camera image.
 
 ### `FlagStabilizer`
 
@@ -202,11 +200,13 @@ x_error = (cx - midpoint) / midpoint if midpoint > 0 else 0.0
 - **Near zero:** centered.
 - **Positive:** right of center.
 
-This value is displayed; it is not yet sent as a steering command.
+This normalized value is displayed. UDP output uses the horizontal offset in pixels instead; the control team decides how that offset changes steering.
 
-The announcement module suppresses repeated same-color messages. A different confirmed color or ten consecutive unconfirmed updates allows another announcement. Terminal output works by default; optional USB Serial sends `FLAG_DETECTED,RED` followed by a newline. The ESP32 display receiver and Wi-Fi control link remain pending.
+The announcement module suppresses repeated same-color messages. A different confirmed color or ten consecutive unconfirmed updates allows another announcement. Terminal output works by default; optional USB Serial sends `FLAG_DETECTED,RED` followed by a newline.
 
-On failed reads, the old detection is cleared and confirmation resets. After 30 consecutive failed reads, the program exits. It does not automatically reconnect or configure camera timeouts. Camera, windows, and optional Serial resources are closed on exit.
+The current Wi-Fi output sends `DET,COLOR,xOffset,area` or `NONE` to the camera's UDP port 5005. The custom camera firmware forwards these messages to the control ESP32 over UART. Receiver behavior, display output and motor integration still need physical verification.
+
+The camera reader keeps the latest available frame rather than a growing queue. On a lost stream, the preview clears the old detection and tries up to three reconnects after five failed reads. It waits for the previous reader to close before opening another. Camera, windows, UDP socket and optional Serial resources are closed on exit.
 
 ## 7. Problems Faced During Development
 
@@ -214,12 +214,12 @@ On failed reads, the old detection is cleared and confirmation resets. After 30 
 | --- | --- |
 | Dark red target did not match the original HSV profile | Adjusted the practice red saturation/value limits. Verify all profiles with actual camera images. |
 | Small details could be lost during processing | Reduced blur and morphology kernels from 5 to 3. This is a tuning choice, not a universal improvement. |
-| White sheet could become the largest detected region | Removed white from the possible flag colors. |
-| A larger colored distractor can win | Documented the limitation; area and shape filters cannot prove flag identity. |
+| White background could become the largest detected region | Removed white from the possible flag colors. |
+| A larger colored distractor can win | The largest matching region is chosen; keep other same-colored objects out of view. |
 | A single frame could produce an unstable result | Require four consecutive same-color detections. |
-| Camera IP changed or video stopped | Update the camera URL and restart when necessary; automatic recovery is not implemented. |
+| Camera IP changed or video stopped | Update `CAM_IP` when the address changes; bounded reconnection handles temporary stream failures. |
 
-Offline tests use synthetic images and simulated hardware to check automatic color detection, blank white backgrounds, target removal, announcements, and cleanup. They do not establish real-camera accuracy.
+Offline tests use synthetic images and simulated hardware to check all six colors at several brightness levels, preview statuses, announcements and cleanup. Robot sockets are mocked. These tests do not establish real-camera accuracy.
 
 Run them with:
 
@@ -247,8 +247,44 @@ White flags are unsupported by the current configuration. The system detects col
 
 The project uses a clear, configurable pipeline to turn ESP32-CAM video into a confirmed color and image position:
 
-**Capture → Prepare → Segment colors → Clean masks → Filter regions → Confirm → Display and announce**
+**Capture → Find colors → Confirm → Display and announce**
 
 The next milestone is a complete robot run: integrate vision output with the control ESP32, verify the display, and test centering and ultrasonic-based 50 cm distance control.
+
+## 10. Meet Lahloba 🚗
+
+All of the code above lives inside one small, very determined robot: **Lahloba**, which means *the spicy car* 🌶️. Small body, big attitude.
+
+**Say hi to Lahloba, our UGV!** 👋 Yes, every wire is load-bearing. No, we will not be taking questions about which one does what.
+
+![Meet Lahloba: top view showing the camera, OLED, batteries, ESP32 and motor driver](docs/lahloba/top-view.jpg)
+
+Lahloba runs on three pink batteries, two yellow wheels and an unreasonable amount of jumper wire. It has exactly one eye (an ESP32-CAM) and a tiny screen it uses to tell everyone how it's feeling. It only really cares about one thing in life: colored flags. Show it a flag and it drives straight over, stops at a polite distance, and tells you what color it saw, like a toddler who just learned colors and wants the whole room to know.
+
+What's inside:
+
+- **Eye:** ESP32-CAM on the green mount up front, streaming video over Wi-Fi to the laptop running this code.
+- **Brain:** the laptop finds and confirms the flag, then sends `DET,COLOR,xOffset,area` messages back to the robot.
+- **Muscles:** an ESP32 controller and an L298N motor driver turning the two yellow gear motors.
+- **Mood screen:** an OLED display showing the current state, color, distance and horizontal offset.
+- **Snacks:** three Li-ion cells and a buck converter keeping the voltage in check.
+
+### Test day recap
+
+**The mood screen in action:** Lahloba reports `STATE: DRIVE`, `COLOR: GREEN`, `DIST: 498 mm` and `XOFF: -107`. In other words: "I see green, it's half a meter away and a bit to my left, and I'm going."
+
+![Lahloba's OLED showing DRIVE, GREEN, 498 mm and -107](docs/lahloba/oled-status.jpg)
+
+**The real test:** Lahloba lines up with a blue flag on a white board while the laptop does the thinking from the floor.
+
+![Lahloba approaching a blue flag on a white board during testing](docs/lahloba/flag-test.jpg)
+
+**Meanwhile, on the laptop:** the Flag Vision Module preview boxes the blue flag in green and marks its center, and the terminal proudly announces `FLAG DETECTED` / `COLOR: BLUE`. Lahloba saw it, the code confirmed it, everyone cheered.
+
+![Laptop running the Flag Vision Module, detecting the blue flag with the terminal printing COLOR: BLUE](docs/lahloba/laptop-view.jpg)
+
+**The team (and Lahloba, front row, center of attention as usual):**
+
+![The team holding Lahloba and the laptop after testing](docs/lahloba/team.jpg)
 
 [Project repository](https://github.com/shrouqelshafey/UGV-Computer-Vision-)

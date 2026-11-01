@@ -8,12 +8,6 @@
         "clip_limit": 2.0,
         "tile_grid_size": 8
     },
-    "white_sheet": {
-        "enabled": true,
-        "max_saturation": 40,
-        "min_brightness": 60,
-        "min_area_ratio": 0.02
-    },
     "colors": {
        "red": {
     "lower1": [0, 45, 40],
