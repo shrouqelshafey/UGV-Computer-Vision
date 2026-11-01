@@ -1,6 +1,7 @@
 """Load the shared JSON settings when the application starts."""
 
 import json
+import math
 from pathlib import Path
 
 
@@ -21,4 +22,17 @@ def load_settings(path=None):
         blur_ksize= settings["blur_kernel_size"]
         if not isinstance(blur_ksize, int) or blur_ksize <= 0 or blur_ksize % 2 == 0:
             raise ValueError("'blur_kernel_size' must be a positive odd integer.")
+    # Reject invalid lighting options before OpenCV starts processing frames.
+    lighting = settings.get("lighting_compensation", {})
+    if not isinstance(lighting, dict):
+        raise ValueError("'lighting_compensation' must be an object.")
+    if not isinstance(lighting.get("enabled", False), bool):
+        raise ValueError("Lighting 'enabled' must be true or false.")
+    clip_limit = lighting.get("clip_limit", 2.0)
+    if (type(clip_limit) not in (int, float)
+            or not math.isfinite(clip_limit) or clip_limit <= 0):
+        raise ValueError("Lighting 'clip_limit' must be a positive finite number.")
+    grid_size = lighting.get("tile_grid_size", 8)
+    if type(grid_size) is not int or not 1 <= grid_size <= 32:
+        raise ValueError("Lighting 'tile_grid_size' must be an integer from 1 to 32.")
     return settings

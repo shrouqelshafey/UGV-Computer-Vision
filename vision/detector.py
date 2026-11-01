@@ -3,6 +3,8 @@
 import cv2
 import numpy as np
 
+from vision.lighting import compensate_lighting
+
 # Area ratios reject image noise without assuming a physical flag size.
 # Shape filtering stays optional when flag proportions are unknown.
 
@@ -81,6 +83,8 @@ def detect_flag(frame, settings):
 
 #convert from BGR to HSV, better for color detection
     hsv=cv2.cvtColor(blurred_frame, cv2.COLOR_BGR2HSV)
+    # Optionally adjust brightness before checking the configured color ranges.
+    hsv = compensate_lighting(hsv, settings)
 #variables that will hold the winning color and its blob
     best_color=None
     best_blob=None
@@ -107,7 +111,7 @@ def detect_flag(frame, settings):
         "color": best_color,
         "area": best_blob["area"],
         "box": best_blob["box"],
-        "center": (center_x, center_y)
+        "center": (center_x, center_y),
     }
 
 
